@@ -231,7 +231,7 @@ async def download_report(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Download a report as a ZIP file containing JSON data and screenshots"""
+    """Download a report as a ZIP file (new format) or text file (legacy format)"""
     
     # Get the report
     report = db.query(Report).filter(Report.id == report_id).first()
@@ -244,13 +244,34 @@ async def download_report(
     
     # Check if evidence file exists
     if not report.evidence_file_path or not os.path.exists(report.evidence_file_path):
-        raise HTTPException(status_code=404, detail="Evidence file not found")
+        # For old reports without evidence files, generate a text report
+        report_data = await get_report_details(report_id, current_user, db)
+        report_content = generate_comprehensive_report(report_data)
+        
+        filename = f"cybershield_report_{report_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        
+        return Response(
+            content=report_content,
+            media_type="text/plain",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
     
-    # Return the ZIP file
+    # Determine file type and serve accordingly
     filename = os.path.basename(report.evidence_file_path)
-    return FileResponse(
-        path=report.evidence_file_path,
-        filename=filename,
-        media_type='application/zip',
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
-    )
+    
+    if filename.endswith('.zip'):
+        # New ZIP format with JSON + screenshots
+        return FileResponse(
+            path=report.evidence_file_path,
+            filename=filename,
+            media_type='application/zip',
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    else:
+        # Legacy text format
+        return FileResponse(
+            path=report.evidence_file_path,
+            filename=filename,
+            media_type='text/plain',
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
